@@ -1,0 +1,88 @@
+name: Sync with AlphaWallet Upstream
+
+on:
+  workflow_dispatch: # Permite ejecutarlo manualmente con un botón en GitHub
+  schedule:
+    - cron: '0 6 * * 1' # Se ejecuta cada lunes a las 06:00 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Expanse Wallet
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Git y estrategia 'ours'
+        run: |
+          git config user.name "Expanse Sync Bot"
+          git config user.email "actions@github.com"
+          git config merge.ours.driver true
+
+      - name: Obtener cambios de AlphaWallet (upstream)
+        run: |
+          git remote add upstream https://github.com/AlphaWallet/alpha-wallet-android.git
+          git fetch upstream master
+
+      - name: Crear rama de sincronización e intentar Merge
+        id: merge_step
+        run: |
+          BRANCH_NAME="sync/alphawallet-$(date +'%Y%m%d')"
+          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "DEFAULT_BRANCH=$DEFAULT_BRANCH" >> $GITHUB_ENV
+
+          git checkout -b "$BRANCH_NAME"
+
+          # Intentar merge sin autocommit para inspeccionar el estado
+          if git merge upstream/master --no-commit --no-ff; then
+            echo "CONFLICTS=false" >> $GITHUB_ENV
+            git commit -m "chore: sync with AlphaWallet upstream ($(date +'%Y-%m-%d'))"
+          else
+            echo "CONFLICTS=true" >> $GITHUB_ENV
+            # Registrar los archivos en conflicto antes de confirmar el estado para el PR
+            CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
+            echo "CONFLICT_FILES<<EOF" >> $GITHUB_ENV
+            echo "$CONFLICT_FILES" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+
+            # Marcar conflictos para revisión manual en el PR
+            git add .
+            git commit -m "chore: sync with AlphaWallet upstream (requiere revisión de conflictos)"
+          fi
+
+          git push -u origin "$BRANCH_NAME" --force
+
+      - name: Crear Pull Request en GitHub
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conflicts = process.env.CONFLICTS === 'true';
+            const conflictFiles = process.env.CONFLICT_FILES || 'Ninguno';
+            const branchName = process.env.BRANCH_NAME;
+            const baseBranch = process.env.DEFAULT_BRANCH;
+
+            let body = `### Sincronización automática con \`AlphaWallet/alpha-wallet-android\`\n\n`;
+            if (conflicts) {
+              body += `⚠️ **Atención:** Se detectaron conflictos que requieren revisión manual para asegurar que los nodos, RPCs y configuraciones de **Expanse (EXP)** se mantengan intactos:\n\n\`\`\`text\n${conflictFiles}\n\`\`\`\n\n`;
+              body += `**Pasos recomendados antes de hacer Merge:**\n1. Revisa los marcadores \`<<<<<<< HEAD\` en los archivos listados.\n2. Conserva el \`ChainID (2)\`, endpoints \`gexp\` y el branding de Expanse.\n3. Verifica que el workflow de compilación (APK) pase correctamente.`;
+            } else {
+              body += `✅ **Fusión limpia:** No hubo conflictos con los archivos principales de Expanse. Verifica que la compilación de Gradle termine sin errores antes de aprobar el PR.`;
+            }
+
+            await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: conflicts
+                ? `⚠️ [Sync] Actualización AlphaWallet (Revisar conflictos Expanse)`
+                : `🔄 [Sync] Actualización AlphaWallet Upstream`,
+              head: branchName,
+              base: baseBranch,
+              body: body
+            });
