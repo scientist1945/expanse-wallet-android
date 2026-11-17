@@ -1,0 +1,71 @@
+name: Gemini Code Assistant
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  gemini-respond:
+    # Solo se ejecuta si el comentario empieza con /gemini y el autor es el dueño del repo
+    if: startsWith(github.event.comment.body, '/gemini') && github.event.comment.author_association == 'OWNER'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Call Gemini API and Reply
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          USER_PROMPT: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Limpiar el prefijo /gemini de la instrucción
+          CLEAN_PROMPT=$(echo "$USER_PROMPT" | sed 's/^\/gemini[[:space:]]*//')
+
+          # Si es un Pull Request, obtener el diff de los cambios para darle contexto a Gemini
+          DIFF_CONTEXT=""
+          if [ "${{ github.event.issue.pull_request != null }}" == "true" ]; then
+            DIFF_CONTEXT=$(gh pr diff "$ISSUE_NUMBER" --repo "$REPO" | head -c 25000)
+          fi
+
+          # Construir el payload JSON de forma segura usando Python
+          python3 -c '
+          import os, json, urllib.request
+
+          prompt = os.environ["CLEAN_PROMPT"]
+          diff = os.environ["DIFF_CONTEXT"]
+
+          full_text = f"Eres un experto en desarrollo Android (Java/Kotlin) y Web3 trabajando en el fork Expanse Wallet Android (basado en AlphaWallet, Chain ID 2).\n\nInstrucción: {prompt}"
+          if diff:
+              full_text += f"\n\nContexto del Pull Request (diff):\n```diff\n{diff}\n```"
+
+          payload = {
+              "contents": [{
+                  "parts": [{"text": full_text}]
+              }]
+          }
+
+          req = urllib.request.Request(
+              f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={os.environ[\"GEMINI_API_KEY\"]}",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"}
+          )
+
+          with urllib.request.urlopen(req) as resp:
+              result = json.loads(resp.read().decode("utf-8"))
+              reply = result["candidates"][0]["content"]["parts"][0]["text"]
+
+          with open("reply.md", "w", encoding="utf-8") as f:
+              f.write(reply)
+          '
+
+          # Publicar la respuesta de Gemini en el Issue o Pull Request
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body-file reply.md
