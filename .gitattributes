@@ -1,0 +1,4 @@
+# Proteger identidad visual y recursos propios de Expanse ante merges con upstream
+app/src/main/res/mipmap-*/** merge=ours
+app/src/main/res/drawable*/ic_launcher* merge=ours
+app/src/main/res/values/strings.xml merge=ours
