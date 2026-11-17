@@ -1,6 +1,14 @@
 package com.alphawallet.app.ui;
 
+<<<<<<< HEAD
 import androidx.lifecycle.ViewModelProvider;
+=======
+import static com.alphawallet.app.C.Key.TICKET_RANGE;
+import static com.alphawallet.app.C.Key.WALLET;
+import static com.alphawallet.app.C.PRUNE_ACTIVITY;
+import static com.alphawallet.app.entity.Operation.SIGN_DATA;
+
+>>>>>>> upstream/master
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -8,9 +16,6 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.os.Bundle;
-import androidx.annotation.Nullable;
-import androidx.localbroadcastmanager.content.LocalBroadcastManager;
-
 import android.view.View;
 import android.webkit.WebView;
 import android.widget.ImageView;
@@ -18,38 +23,33 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.alphawallet.app.BuildConfig;
+import androidx.annotation.Nullable;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
 import com.alphawallet.app.C;
-import com.alphawallet.app.viewmodel.RedeemAssetSelectViewModel;
-import com.alphawallet.app.web3.Web3TokenView;
-import com.alphawallet.app.web3.entity.PageReadyCallback;
-import com.alphawallet.ethereum.EthereumNetworkBase;
-import com.google.zxing.BarcodeFormat;
-import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.common.BitMatrix;
-import com.journeyapps.barcodescanner.BarcodeEncoder;
+import com.alphawallet.app.R;
 import com.alphawallet.app.entity.FinishReceiver;
 import com.alphawallet.app.entity.SignAuthenticationCallback;
 import com.alphawallet.app.entity.SignaturePair;
-import com.alphawallet.app.entity.tokens.Token;
 import com.alphawallet.app.entity.Wallet;
+import com.alphawallet.hardware.SignatureFromKey;
+import com.alphawallet.app.entity.tokens.Token;
 import com.alphawallet.app.ui.widget.entity.TicketRangeParcel;
-
-import timber.log.Timber;
-
-import com.alphawallet.app.R;
-
 import com.alphawallet.app.viewmodel.RedeemSignatureDisplayModel;
+import com.alphawallet.app.web3.Web3TokenView;
+import com.alphawallet.app.web3.entity.PageReadyCallback;
 import com.alphawallet.app.widget.AWalletAlertDialog;
 import com.alphawallet.app.widget.SignTransactionDialog;
-
-import javax.inject.Inject;
-
-import static com.alphawallet.app.C.Key.*;
-import static com.alphawallet.app.C.PRUNE_ACTIVITY;
-import static com.alphawallet.app.entity.Operation.SIGN_DATA;
+import com.alphawallet.ethereum.EthereumNetworkBase;
+import com.alphawallet.token.entity.ViewType;
+/*import com.google.zxing.BarcodeFormat;
+import com.google.zxing.MultiFormatWriter;
+import com.google.zxing.common.BitMatrix;
+import com.journeyapps.barcodescanner.BarcodeEncoder;*/
 
 import dagger.hilt.android.AndroidEntryPoint;
+import timber.log.Timber;
 
 /**
  * Created by James on 24/01/2018.
@@ -105,9 +105,10 @@ public class RedeemSignatureDisplayActivity extends BaseActivity implements View
         tv.setVisibility(View.VISIBLE);
 
         //given a webview populate with rendered token
+        tokenView.setChainId(token.tokenInfo.chainId);
         tokenView.displayTicketHolder(token, ticketRange.range, viewModel.getAssetDefinitionService());
         tokenView.setOnReadyCallback(this);
-        tokenView.setLayout(token, true);
+        tokenView.setLayout(token, ViewType.ITEM_VIEW);
         finishReceiver = new FinishReceiver(this);
     }
 
@@ -117,7 +118,7 @@ public class RedeemSignatureDisplayActivity extends BaseActivity implements View
     }
 
     private Bitmap createQRImage(String address) {
-        Point size = new Point();
+        /*Point size = new Point();
         getWindowManager().getDefaultDisplay().getSize(size);
         int imageSize = (int) (size.x * QR_IMAGE_WIDTH_RATIO);
         try {
@@ -132,7 +133,7 @@ public class RedeemSignatureDisplayActivity extends BaseActivity implements View
         } catch (Exception e) {
             Toast.makeText(this, getString(R.string.error_fail_generate_qr), Toast.LENGTH_SHORT)
                     .show();
-        }
+        }*/
         return null;
     }
 
@@ -183,6 +184,8 @@ public class RedeemSignatureDisplayActivity extends BaseActivity implements View
         dialog.setTitle(R.string.ticket_redeemed);
         dialog.setIcon(AWalletAlertDialog.SUCCESS);
         dialog.setOnDismissListener(v -> {
+            Intent pruneIntent = new Intent(PRUNE_ACTIVITY);
+            pruneIntent.setPackage("com.alphawallet.app.entity.FinishReceiver");
             LocalBroadcastManager.getInstance(this).sendBroadcast(new Intent(PRUNE_ACTIVITY));
         });
         dialog.show();
@@ -253,6 +256,12 @@ public class RedeemSignatureDisplayActivity extends BaseActivity implements View
         });
         dialog.setCancelable(true);
         dialog.show();
+    }
+
+    @Override
+    public void gotSignature(SignatureFromKey signature)
+    {
+        viewModel.completeHardwareSign(signature);
     }
 
     private void dialogKeyNotAvailableError()

@@ -1,6 +1,8 @@
 package com.alphawallet.app.ui;
 
 import static com.alphawallet.app.C.Key.WALLET;
+import static com.alphawallet.app.C.SIGNAL_NFT_SYNC;
+import static com.alphawallet.app.C.SYNC_STATUS;
 
 import android.content.Intent;
 import android.os.Bundle;
@@ -47,16 +49,12 @@ import dagger.hilt.android.AndroidEntryPoint;
 public class NFTActivity extends BaseActivity implements StandardFunctionInterface
 {
     private NFTViewModel viewModel;
-
     private Wallet wallet;
     private Token token;
-    private FunctionButtonBar functionBar;
     private boolean isGridView;
-
     private MenuItem sendMultipleTokensMenuItem;
     private MenuItem switchToGridViewMenuItem;
     private MenuItem switchToListViewMenuItem;
-
     private NFTAssetsFragment assetsFragment;
 
     private final ActivityResultLauncher<Intent> handleTransactionSuccess = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
@@ -82,16 +80,35 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         initViewModel();
         getIntentData();
         setTitle(token.tokenInfo.name);
-        isGridView = !hasTokenScriptOverride(token);
+        isGridView = !hasTokenScriptOverride(token) && token.isERC875();
         setupViewPager();
 
         //check NFT events, expedite balance update
+        syncListener();
         viewModel.checkEventsForToken(token);
+        viewModel.updateAttributes(token);
+    }
+
+    private void syncListener()
+    {
+        getSupportFragmentManager()
+                .setFragmentResultListener(SIGNAL_NFT_SYNC, this, (requestKey, b) ->
+                {
+                    CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+                    if (!b.getBoolean(SYNC_STATUS, false))
+                    {
+                        certificateToolbar.nftSyncComplete();
+                    }
+                    else
+                    {
+                        certificateToolbar.showNFTSync();
+                    }
+                });
     }
 
     private boolean hasTokenScriptOverride(Token t)
     {
-        return viewModel.getAssetDefinitionService().hasTokenView(t.tokenInfo.chainId, t.getAddress(), AssetDefinitionService.ASSET_SUMMARY_VIEW_NAME);
+        return viewModel.getAssetDefinitionService().hasTokenView(t, AssetDefinitionService.ASSET_SUMMARY_VIEW_NAME);
     }
 
     private void onSignature(XMLDsigDescriptor descriptor)
@@ -115,13 +132,13 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         viewModel.newScriptFound().observe(this, this::newScriptFound);
     }
 
-    private void newScriptFound(Boolean status)
+    private void newScriptFound(Boolean scriptUpdated)
     {
-        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
-        certificateToolbar.stopDownload();
         //determinate signature
-        if (token != null)
+        if (token != null && scriptUpdated)
         {
+            CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+            certificateToolbar.stopDownload();
             certificateToolbar.setVisibility(View.VISIBLE);
             viewModel.checkTokenScriptValidity(token);
         }
@@ -199,6 +216,13 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         setupTabs(viewPager, pages);
     }
 
+    @Override
+    public void onResume()
+    {
+        super.onResume();
+        if (assetsFragment == null) recreate();
+    }
+
     private void setupTabs(ViewPager2 viewPager, List<Pair<String, Fragment>> pages)
     {
         TabLayout tabLayout = findViewById(R.id.tab_layout);
@@ -208,8 +232,6 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
 
         TabUtils.decorateTabLayout(this, tabLayout);
 
-//        viewPager.setCurrentItem(1, true);
-
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener()
         {
             @Override
@@ -218,11 +240,9 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
                 switch (tab.getPosition())
                 {
                     case 0:
-                        // showFunctionBar(true);
                         showMenu();
                         break;
                     default:
-                        // showFunctionBar(false);
                         hideMenu();
                         break;
                 }
@@ -240,16 +260,6 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
 
             }
         });
-    }
-
-    private void showFunctionBar(boolean show)
-    {
-        if (functionBar == null && !show) return;
-        if (BuildConfig.DEBUG || wallet.type != WalletType.WATCH)
-        {
-            if (functionBar == null) setupFunctionBar();
-            functionBar.setVisibility(show ? View.VISIBLE : View.GONE);
-        }
     }
 
     @Override
@@ -323,23 +333,20 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         viewModel.onDestroy();
     }
 
-    private void setupFunctionBar()
-    {
-        if (BuildConfig.DEBUG || wallet.type != WalletType.WATCH)
-        {
-            functionBar = findViewById(R.id.layoutButtons);
-            functionBar.setupFunctions(this, viewModel.getAssetDefinitionService(), token, null, null);
-            functionBar.revealButtons();
-            functionBar.setWalletType(wallet.type);
-            functionBar.setVisibility(View.GONE);
-        }
-    }
-
     private void hideMenu()
     {
-        sendMultipleTokensMenuItem.setVisible(false);
-        switchToGridViewMenuItem.setVisible(false);
-        switchToListViewMenuItem.setVisible(false);
+        if (sendMultipleTokensMenuItem != null)
+        {
+            sendMultipleTokensMenuItem.setVisible(false);
+        }
+        if (switchToGridViewMenuItem != null)
+        {
+            switchToGridViewMenuItem.setVisible(false);
+        }
+        if (switchToListViewMenuItem != null)
+        {
+            switchToListViewMenuItem.setVisible(false);
+        }
     }
 
     private void showMenu()

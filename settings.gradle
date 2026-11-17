@@ -18,6 +18,7 @@ dependencyResolutionManagement {
         mavenCentral()
         maven { url 'https://jitpack.io' }
         maven {
+<<<<<<< HEAD
             url = uri("https://maven.pkg.github.com/trustwallet/wallet-core")
             credentials {
                 username = getGitHubUsername() as String ?: System.getenv("GITHUB_USER")
@@ -25,12 +26,15 @@ dependencyResolutionManagement {
             }
         }
         maven {
+=======
+>>>>>>> upstream/master
             url "https://plugins.gradle.org/m2/"
         }
         maven { url 'https://repo.spring.io/milestone' }
     }
 }
 
+<<<<<<< HEAD
 private static String getGitHubUsername() {
     "JamesSmartCell"
 }
@@ -43,3 +47,7 @@ private static String getPAT() {
 
 rootProject.name = "ExpWallet"
 include ':app', ':lib', ':hardware_stub' //, ':dmz' //TODO: Fix DMZ for Gradle 8
+=======
+rootProject.name = "AlphaWallet"
+include ':app', ':lib', ':hardware_stub' //, ':dmz' //TODO: Fix DMZ for Gradle 8
+>>>>>>> upstream/master

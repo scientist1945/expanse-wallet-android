@@ -1,5 +1,7 @@
 package com.alphawallet.app.ui;
 
+import static java.util.Collections.singletonList;
+
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.InputType;
@@ -22,16 +24,13 @@ import java.util.List;
 
 import dagger.hilt.android.AndroidEntryPoint;
 
-import static java.util.Collections.singletonList;
-
 @AndroidEntryPoint
 public class AddCustomRPCNetworkActivity extends BaseActivity implements StandardFunctionInterface
 {
 
     public static final String CHAIN_ID = "chain_id";
-
+    private final Handler handler = new Handler();
     private CustomNetworkViewModel viewModel;
-
     private InputView nameInputView;
     private InputView rpcUrlInputView;
     private InputView chainIdInputView;
@@ -39,9 +38,8 @@ public class AddCustomRPCNetworkActivity extends BaseActivity implements Standar
     private InputView blockExplorerUrlInputView;
     private InputView blockExplorerApiUrl;
     private MaterialCheckBox testNetCheckBox;
-
-    private final Handler handler = new Handler();
     private long chainId;
+    private boolean isEditMode;
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
@@ -83,7 +81,7 @@ public class AddCustomRPCNetworkActivity extends BaseActivity implements Standar
         initViewModel();
 
         chainId = getIntent().getLongExtra(CHAIN_ID, -1);
-        boolean isEditMode = chainId >= 0;
+        isEditMode = chainId >= 0;
 
         if (isEditMode)
         {
@@ -107,6 +105,12 @@ public class AddCustomRPCNetworkActivity extends BaseActivity implements Standar
         {
             addFunctionBar(singletonList(R.string.action_add_network));
         }
+    }
+
+    @Override
+    protected void onResume()
+    {
+        super.onResume();
     }
 
     private void addFunctionBar(List<Integer> functionResources)
@@ -221,7 +225,9 @@ public class AddCustomRPCNetworkActivity extends BaseActivity implements Standar
 
         if (validateInputs())
         {
-            viewModel.saveNetwork(nameInputView.getText().toString(),
+            viewModel.saveNetwork(
+                    isEditMode,
+                    nameInputView.getText().toString(),
                     rpcUrlInputView.getText().toString(),
                     Long.parseLong(chainIdInputView.getText().toString()),
                     symbolInputView.getText().toString(),

@@ -1,4 +1,5 @@
 plugins {
+<<<<<<< HEAD
     id 'com.android.library'
 }
 
@@ -26,6 +27,11 @@ android {
     }
 }
 
+=======
+    id 'java-library'
+}
+
+>>>>>>> upstream/master
 dependencies {
 
     implementation files('../app/libs/abi-4.9.8.jar')
@@ -35,12 +41,21 @@ dependencies {
 
     testImplementation libs.junit
 
+<<<<<<< HEAD
     implementation libs.bouncycastle.bcprov.jdk15on
+=======
+    implementation libs.bouncycastle.bcprov.jdk18on
+>>>>>>> upstream/master
     // https://mvnrepository.com/artifact/com.github.cliftonlabs/json-simple
     implementation libs.json.simple
     // https://mvnrepository.com/artifact/com.google.code.gson/gson
     implementation libs.gson
 }
 
+<<<<<<< HEAD
 sourceCompatibility = "17"
 targetCompatibility = "17"
+=======
+sourceCompatibility = "21"
+targetCompatibility = "21"
+>>>>>>> upstream/master

@@ -35,11 +35,37 @@ public class WalletFragmentActionsView extends FrameLayout implements View.OnCli
     }
 
     @Override
+<<<<<<< HEAD
     public void onClick(View view) {
+=======
+    public void onClick(View view)
+    {
+>>>>>>> upstream/master
         if (view.getId() == R.id.copy_wallet_address_action)
         {
             if (onCopyWalletAddressClickListener != null) {
                 onCopyWalletAddressClickListener.onClick(view);
+<<<<<<< HEAD
+=======
+            }
+        }
+        else if (view.getId() == R.id.show_my_wallet_address_action)
+        {
+            if (onShowMyWalletAddressClickListener != null) {
+                onShowMyWalletAddressClickListener.onClick(view);
+            }
+        }
+        else if (view.getId() == R.id.add_hide_tokens_action)
+        {
+            if (onAddHideTokensClickListener != null) {
+                onAddHideTokensClickListener.onClick(view);
+            }
+        }
+        else if (view.getId() == R.id.rename_this_wallet_action)
+        {
+            if (onRenameThisWalletListener != null) {
+                onRenameThisWalletListener.onClick(view);
+>>>>>>> upstream/master
             }
         }
         else if (view.getId() == R.id.show_my_wallet_address_action)

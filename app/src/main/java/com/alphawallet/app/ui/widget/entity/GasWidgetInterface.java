@@ -1,7 +1,7 @@
 package com.alphawallet.app.ui.widget.entity;
 
 import com.alphawallet.app.web3.entity.Web3Transaction;
-import com.alphawallet.app.widget.ActionSheetMode;
+import com.alphawallet.app.entity.analytics.ActionSheetMode;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -23,9 +23,16 @@ public interface GasWidgetInterface
     BigInteger getPriorityFee();
     BigInteger getGasPrice();
     void setGasEstimate(BigInteger estimate);
+    void setGasEstimateExact(BigInteger estimate);
     void onDestroy();
     boolean checkSufficientGas();
     void setupResendSettings(ActionSheetMode mode, BigInteger gasPrice);
     void setCurrentGasIndex(int gasSelectionIndex, BigInteger maxFeePerGas, BigInteger maxPriorityFee, BigDecimal customGasLimit, long expectedTxTime, long customNonce);
     long getExpectedTransactionTime();
+    default boolean gasPriceReady(long gasEstimateTime)
+    {
+        return gasEstimateTime > (System.currentTimeMillis() - 30 * 1000);
+    }
+
+    boolean gasPriceReady();
 }

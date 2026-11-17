@@ -42,4 +42,8 @@ run {
 
 task wrapper(type: Wrapper) {
     gradleVersion = '7.4.2'
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> upstream/master

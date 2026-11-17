@@ -1,47 +1,51 @@
 package com.alphawallet.app.entity;
 
+import static com.alphawallet.app.repository.EthereumNetworkBase.COVALENT;
+
 import android.net.Uri;
+import android.text.TextUtils;
 
 import androidx.annotation.Nullable;
 
-import static com.alphawallet.app.repository.EthereumNetworkBase.COVALENT;
-
+import com.alphawallet.app.entity.transactionAPI.TransferFetchType;
 import com.alphawallet.app.repository.EthereumNetworkRepository;
 import com.alphawallet.app.util.Utils;
 
-public class NetworkInfo extends com.alphawallet.ethereum.NetworkInfo {
+public class NetworkInfo extends com.alphawallet.ethereum.NetworkInfo
+{
+    private final String ETHERSCAN_API = ".etherscan.";
     private final String BLOCKSCOUT_API = "blockscout";
     private final String MATIC_API = "polygonscan";
+    private final String OKX_API = "oklink";
+    private final String ARBISCAN_API = "https://api.arbiscan";
     private final String PALM_API = "explorer.palm";
 
-    public  String backupNodeUrl = null;
     public  String etherscanAPI = null; //This is used by the API call to fetch transactions
+    public  String[] rpcUrls;
 
     public NetworkInfo(
             String name,
             String symbol,
-            String rpcServerUrl,
+            String[] rpcServerUrl,
             String etherscanUrl,
             long chainId,
-            String backupNodeUrl,
             String etherscanAPI,
             boolean isCustom) {
-        super(name, symbol, rpcServerUrl, etherscanUrl, chainId, isCustom);
-        this.backupNodeUrl = backupNodeUrl;
+        super(name, symbol, rpcServerUrl[0], etherscanUrl, chainId, isCustom);
         this.etherscanAPI = etherscanAPI;
+        this.rpcUrls = rpcServerUrl;
     }
 
     public NetworkInfo(
             String name,
             String symbol,
-            String rpcServerUrl,
+            String[] rpcServerUrl,
             String etherscanUrl,
             long chainId,
-            String backupNodeUrl,
             String etherscanAPI) {
-        super(name, symbol, rpcServerUrl, etherscanUrl, chainId, false);
-        this.backupNodeUrl = backupNodeUrl;
+        super(name, symbol, rpcServerUrl[0], etherscanUrl, chainId, false);
         this.etherscanAPI = etherscanAPI;
+        this.rpcUrls = rpcServerUrl;
     }
 
     public String getShortName()
@@ -52,10 +56,28 @@ public class NetworkInfo extends com.alphawallet.ethereum.NetworkInfo {
         else return this.name;
     }
 
-    public boolean usesSeparateNFTTransferQuery()
+    public TransferFetchType[] getTransferQueriesUsed()
     {
-        return (etherscanAPI != null && !etherscanAPI.contains(BLOCKSCOUT_API)
-                && !etherscanAPI.contains(COVALENT) && !etherscanAPI.contains(PALM_API));
+        if (etherscanAPI.contains(COVALENT) || TextUtils.isEmpty(etherscanAPI))
+        {
+            return new TransferFetchType[0];
+        }
+        else if (etherscanAPI.startsWith(ARBISCAN_API))
+        {
+            return new TransferFetchType[]{TransferFetchType.ERC_20, TransferFetchType.ERC_721};
+        }
+        else if (etherscanAPI.contains(MATIC_API) || etherscanAPI.contains(ETHERSCAN_API) || etherscanAPI.contains(OKX_API) || etherscanAPI.contains("basescan.org"))
+        {
+            return new TransferFetchType[]{TransferFetchType.ERC_20, TransferFetchType.ERC_721, TransferFetchType.ERC_1155};
+        }
+        else if (etherscanAPI.contains(BLOCKSCOUT_API))
+        {
+            return new TransferFetchType[]{TransferFetchType.ERC_20}; // assume it only supports tokenTx, eg Blockscout, Palm
+        }
+        else //play it safe, assume other API has ERC20
+        {
+            return new TransferFetchType[]{TransferFetchType.ERC_20, TransferFetchType.ERC_721};
+        }
     }
 
     @Nullable

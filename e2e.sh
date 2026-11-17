@@ -18,12 +18,25 @@ touch output/emulator.log                    # create log file
 chmod 666 output/emulator.log                # allow writing to log file
 adb logcat >> output/emulator.log &
 
+source ~/.bashrc
+ganache --chain.chainId 2 -h 0.0.0.0 -m "horse light surface bamboo combine item lumber tunnel choose acid mail feature" -p 8555
+adb shell rm /storage/emulated/0/DCIM/*.png
 ./gradlew :app:uninstallAll :app:connectedNoAnalyticsDebugAndroidTest -x lint -PdisablePreDex
-if [ "$?" != "0" ]; then
-  adb pull /storage/emulated/0/DCIM/ output
-  if [ "$1" != "--CI" ]; then
-    open output/DCIM/*.png
-  fi
+adb shell rm /storage/emulated/0/DCIM/*.png
 
-  exit 1
+if [ "$?" == "0" ]; then
+  kill -9 $(lsof -t -i:8555)
+  exit 0
 fi
+
+adb pull /storage/emulated/0/DCIM/ output
+if [ "$1" != "--CI" ]; then
+  open output/DCIM/*.png
+fi
+
+
+# Copy test report
+cp -r app/build/reports/androidTests/connected/flavors/noAnalytics/ output/html
+
+kill -9 $(lsof -t -i:8555)
+exit 1

@@ -1,5 +1,8 @@
 package com.alphawallet.app.repository;
 
+import static com.alphawallet.ethereum.EthereumNetworkBase.GNOSIS_ID;
+import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
+
 import android.content.Context;
 
 import com.alphawallet.app.entity.ContractLocator;
@@ -15,10 +18,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+<<<<<<< HEAD
 import static com.alphawallet.ethereum.EthereumNetworkBase.EXPANSE_ID;
 import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
 import static com.alphawallet.ethereum.EthereumNetworkBase.XDAI_ID;
 
+=======
+>>>>>>> upstream/master
 public class EthereumNetworkRepository extends EthereumNetworkBase
 {
     private final Context context;
@@ -78,7 +84,18 @@ public class EthereumNetworkRepository extends EthereumNetworkBase
         {
             for (UnknownToken unknownToken: knownContract.getExpanse())
             {
+<<<<<<< HEAD
                 popularTokens.put(unknownToken.address.toLowerCase(), new ContractLocator(unknownToken.address, EXPANSE_ID));
+=======
+                popularTokens.put(unknownToken.address.toLowerCase(), new ContractLocator(unknownToken.address, MAINNET_ID));
+            }
+        }
+        if (networkFilters == null || networkFilters.contains(GNOSIS_ID))
+        {
+            for (UnknownToken unknownToken: knownContract.getXDAI())
+            {
+                popularTokens.put(unknownToken.address.toLowerCase(), new ContractLocator(unknownToken.address, GNOSIS_ID));
+>>>>>>> upstream/master
             }
         }
     }
