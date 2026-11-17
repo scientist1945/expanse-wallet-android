@@ -1,8 +1,8 @@
 package com.alphawallet.app.viewmodel;
 
+import com.alphawallet.app.entity.NetworkInfo;
 import com.alphawallet.app.repository.EthereumNetworkRepository;
 import com.alphawallet.app.repository.EthereumNetworkRepositoryType;
-import com.alphawallet.app.entity.NetworkInfo;
 
 import javax.inject.Inject;
 
@@ -20,15 +20,18 @@ public class CustomNetworkViewModel extends BaseViewModel
         this.ethereumNetworkRepository = ethereumNetworkRepository;
     }
 
-    public void saveNetwork(String name, String rpcUrl, long chainId, String symbol, String blockExplorerUrl, String explorerApiUrl, boolean isTestnet, Long oldChainId) {
+    public void saveNetwork(boolean isEditMode, String name, String rpcUrl, long chainId, String symbol, String blockExplorerUrl, String explorerApiUrl, boolean isTestnet, Long oldChainId)
+    {
         this.ethereumNetworkRepository.saveCustomRPCNetwork(name, rpcUrl, chainId, symbol, blockExplorerUrl, explorerApiUrl, isTestnet, oldChainId);
     }
 
-    public NetworkInfo getNetworkInfo(long chainId) {
-        return this.ethereumNetworkRepository.getNetworkByChain(chainId);
+    public NetworkInfo getNetworkInfo(long chainId)
+    {
+        return ethereumNetworkRepository.getNetworkByChain(chainId);
     }
 
-    public boolean isTestNetwork(NetworkInfo network) {
+    public boolean isTestNetwork(NetworkInfo network)
+    {
         return !EthereumNetworkRepository.hasRealValue(network.chainId);
     }
 

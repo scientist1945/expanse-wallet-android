@@ -10,9 +10,9 @@ import static com.alphawallet.app.entity.tokenscript.TokenscriptFunction.ZERO_AD
 import static com.alphawallet.app.service.KeyService.AuthenticationLevel.STRONGBOX_NO_AUTHENTICATION;
 import static com.alphawallet.app.service.KeyService.AuthenticationLevel.TEE_NO_AUTHENTICATION;
 import static com.alphawallet.app.service.KeystoreAccountService.KEYSTORE_FOLDER;
+import static com.alphawallet.app.service.KeystoreAccountService.bytesFromSignature;
 import static com.alphawallet.app.service.LegacyKeystore.getLegacyPassword;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.KeyguardManager;
 import android.content.Context;
@@ -23,13 +23,13 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.security.keystore.StrongBoxUnavailableException;
 import android.security.keystore.UserNotAuthenticatedException;
+import android.util.Pair;
 import android.widget.Toast;
 
 import androidx.annotation.RequiresApi;
 
 import com.alphawallet.app.BuildConfig;
 import com.alphawallet.app.R;
-import com.alphawallet.app.entity.AnalyticsProperties;
 import com.alphawallet.app.entity.AuthenticationCallback;
 import com.alphawallet.app.entity.AuthenticationFailType;
 import com.alphawallet.app.entity.CreateWalletCallbackInterface;
@@ -41,19 +41,24 @@ import com.alphawallet.app.entity.SignAuthenticationCallback;
 import com.alphawallet.app.entity.Wallet;
 import com.alphawallet.app.entity.cryptokeys.KeyEncodingType;
 import com.alphawallet.app.entity.cryptokeys.KeyServiceException;
-import com.alphawallet.app.entity.cryptokeys.SignatureFromKey;
-import com.alphawallet.app.entity.cryptokeys.SignatureReturnType;
+import com.alphawallet.app.util.Utils;
 import com.alphawallet.app.widget.AWalletAlertDialog;
 import com.alphawallet.app.widget.SignTransactionDialog;
+import com.alphawallet.hardware.HardwareCallback;
+import com.alphawallet.hardware.HardwareDevice;
+import com.alphawallet.hardware.SignatureFromKey;
+import com.alphawallet.hardware.SignatureReturnType;
 
+import org.web3j.crypto.Bip32ECKeyPair;
 import org.web3j.crypto.Credentials;
+import org.web3j.crypto.ECKeyPair;
+import org.web3j.crypto.MnemonicUtils;
 import org.web3j.crypto.Sign;
 import org.web3j.utils.Numeric;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -66,6 +71,7 @@ import java.security.NoSuchProviderException;
 import java.security.SecureRandom;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.security.spec.AlgorithmParameterSpec;
 import java.util.Enumeration;
 
 import javax.crypto.Cipher;
@@ -75,25 +81,29 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.IvParameterSpec;
 
 import timber.log.Timber;
+<<<<<<< HEAD
 import wallet.core.jni.CoinType;
 import wallet.core.jni.Curve;
 import wallet.core.jni.HDWallet;
 import wallet.core.jni.Hash;
 import wallet.core.jni.Mnemonic;
 import wallet.core.jni.PrivateKey;
+=======
+>>>>>>> upstream/master
 
-@TargetApi(23)
-public class KeyService implements AuthenticationCallback, PinAuthenticationCallbackInterface
+public class KeyService implements AuthenticationCallback, PinAuthenticationCallbackInterface, HardwareCallback
 {
     private static final String TAG = "HDWallet";
-    private static final String ANDROID_KEY_STORE = "AndroidKeyStore";
+    private static final int AUTHENTICATION_DURATION_SECONDS = 30;
     private static final String BLOCK_MODE = KeyProperties.BLOCK_MODE_GCM;
     private static final String PADDING = KeyProperties.ENCRYPTION_PADDING_NONE;
-    private static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
-    private static final int AUTHENTICATION_DURATION_SECONDS = 30;
-    public  static final String FAILED_SIGNATURE = "00000000000000000000000000000000000000000000000000000000000000000";
+
+    public static final String ANDROID_KEY_STORE = "AndroidKeyStore";
+    public static final String LEGACY_CIPHER_ALGORITHM = "AES/CBC/PKCS7Padding";
+    public static final String CIPHER_ALGORITHM = "AES/GCM/NoPadding";
 
     //This value determines the time interval between the user swiping away the backup warning notice and it re-appearing
     public static final long TIME_BETWEEN_BACKUP_WARNING_MILLIS = 1000L * 60L * 60L * 24L * 30L; //30 days //1000 * 60 * 3; //3 minutes for testing
@@ -109,7 +119,7 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         REQUESTING_SECURITY, NO_SCREENLOCK, ALREADY_LOCKED, ERROR, SUCCESSFULLY_UPGRADED
     }
 
-    public class UpgradeKeyResult
+    public static class UpgradeKeyResult
     {
         public final UpgradeKeyResultType result;
         public final String message;
@@ -128,8 +138,17 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
     }
 
     private static final int DEFAULT_KEY_STRENGTH = 128;
+    private static final int[] ETH_DERIVATION_PATH = {
+            44 | Bip32ECKeyPair.HARDENED_BIT,
+            60 | Bip32ECKeyPair.HARDENED_BIT,
+            0 | Bip32ECKeyPair.HARDENED_BIT,
+            0,
+            0
+    };
     private final Context context;
     private Activity activity;
+
+    private final HardwareDevice hardwareDevice;
 
     //Used for keeping the Ethereum account information between re-entrant calls
     private Wallet currentWallet;
@@ -140,7 +159,6 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
     private CreateWalletCallbackInterface callbackInterface;
     private ImportWalletCallback importCallback;
     private SignAuthenticationCallback signCallback;
-    private final AnalyticsServiceType<AnalyticsProperties> analyticsService;
     private boolean requireAuthentication = false;
 
     private static SecurityStatus securityStatus = SecurityStatus.NOT_CHECKED;
@@ -150,11 +168,10 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         return context;
     }
 
-    public KeyService(Context ctx, AnalyticsServiceType<AnalyticsProperties> analyticsService)
+    public KeyService(Context ctx)
     {
-        System.loadLibrary("TrustWalletCore");
         this.context = ctx;
-        this.analyticsService = analyticsService;
+        this.hardwareDevice = new HardwareDevice(this);
         checkSecurity();
     }
 
@@ -231,14 +248,17 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         importCallback = callback;
 
         //cursory check for valid key import
+<<<<<<< HEAD
         if (!Mnemonic.isValid(seedPhrase))
+=======
+        if (!MnemonicUtils.validateMnemonic(seedPhrase))
+>>>>>>> upstream/master
         {
             callback.walletValidated(null, KeyEncodingType.SEED_PHRASE_KEY, AuthenticationLevel.NOT_SET);
         }
         else
         {
-            HDWallet newWallet = new HDWallet(seedPhrase, "");
-            storeHDKey(newWallet, false); //store encrypted bytes in case of re-entry
+            storeHDKey(seedPhrase, false); //store encrypted bytes in case of re-entry
             checkAuthentication(IMPORT_HD_KEY);
         }
     }
@@ -297,6 +317,7 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
 
         switch (wallet.type)
         {
+            case HARDWARE: //bypass this step as with hardware we obtain authentication simultaneously with signing
             case KEYSTORE_LEGACY:
                 signCallback.gotAuthorisation(true); //Legacy keys don't require authentication
                 break;
@@ -310,6 +331,24 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
                 signCallback.gotAuthorisation(false);
                 break;
         }
+    }
+
+    @Override
+    public void signedMessageFromHardware(SignatureFromKey returnSig)
+    {
+        signCallback.gotSignature(returnSig);
+    }
+
+    @Override
+    public void onCardReadStart()
+    {
+        //TODO: Display card read in progress
+    }
+
+    @Override
+    public void hardwareCardError(String message)
+    {
+        signCallback.signingError(message);
     }
 
     public void setRequireAuthentication()
@@ -359,8 +398,6 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
     synchronized SignatureFromKey signData(Wallet wallet, byte[] TBSdata)
     {
         SignatureFromKey returnSig = new SignatureFromKey();
-        returnSig.sigType = SignatureReturnType.KEY_AUTHENTICATION_ERROR;
-        returnSig.signature = FAILED_SIGNATURE.getBytes();
 
         currentWallet = wallet;
         switch (wallet.type)
@@ -369,15 +406,14 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
             case KEYSTORE:
                 returnSig = signWithKeystore(TBSdata);
                 break;
-
             case HDKEY:
                 try
                 {
                     String mnemonic = unpackMnemonic();
-                    HDWallet newWallet = new HDWallet(mnemonic, "");
-                    PrivateKey pk = newWallet.getKeyForCoin(CoinType.ETHEREUM);
-                    byte[] digest = Hash.keccak256(TBSdata);
-                    returnSig.signature = pk.sign(digest, Curve.SECP256K1);
+                    ECKeyPair keyPair = deriveEthereumKeyPairFromMnemonic(mnemonic);
+                    byte[] digest = org.web3j.crypto.Hash.sha3(TBSdata);
+                    Sign.SignatureData signature = Sign.signMessage(digest, keyPair, false);
+                    returnSig.signature = bytesFromSignature(signature);
                     returnSig.sigType = SignatureReturnType.SIGNATURE_GENERATED;
                 }
                 catch (KeyServiceException | UserNotAuthenticatedException e)
@@ -387,6 +423,11 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
                 break;
             case WATCH:
                 returnSig.failMessage = context.getString(R.string.action_watch_account);
+                break;
+            case HARDWARE:
+                hardwareDevice.activateReader(activity);
+                hardwareDevice.setSigningData(org.web3j.crypto.Hash.sha3(TBSdata));
+                returnSig.sigType = SignatureReturnType.SIGNING_POSTPONED;
                 break;
             case NOT_DEFINED:
             case TEXT_MARKER:
@@ -435,7 +476,6 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         catch (ServiceErrorException e)
         {
             //Legacy keystore error
-            if (!BuildConfig.DEBUG) analyticsService.recordException(e);
             e.printStackTrace();
         }
         catch (KeyServiceException e)
@@ -511,10 +551,64 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         }
     }
 
+    public Pair<KeyExceptionType, String> testCipher(String walletAddress, String cipherAlgorithm)
+    {
+        KeyExceptionType retVal = KeyExceptionType.UNKNOWN;
+        String keyData = null;
+        try
+        {
+            String encryptedDataFilePath = KeyService.getFilePath(context, walletAddress);
+            String keyIv = KeyService.getFilePath(context, walletAddress + "iv");
+            boolean ivExists = new File(keyIv).exists();
+            boolean aliasExists = new File(encryptedDataFilePath).exists();
+
+            if (!ivExists)
+            {
+                retVal = KeyExceptionType.IV_NOT_FOUND;
+                throw new Exception("iv file doesn't exist");
+            }
+            if (!aliasExists)
+            {
+                retVal = KeyExceptionType.ENCRYPTED_FILE_NOT_FOUND;
+                throw new Exception("Key file doesn't exist");
+            }
+
+            //test legacy key
+            byte[] iv = KeyService.readBytesFromFile(keyIv);
+
+            KeyStore keyStore = KeyStore.getInstance(ANDROID_KEY_STORE);
+            keyStore.load(null);
+            SecretKey secretKey = (SecretKey) keyStore.getKey(walletAddress, null);
+
+            Cipher outCipher = Cipher.getInstance(cipherAlgorithm);
+            final AlgorithmParameterSpec spec = cipherAlgorithm.equals(CIPHER_ALGORITHM) ? new GCMParameterSpec(128, iv) : new IvParameterSpec(iv);
+            outCipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+            CipherInputStream cipherInputStream = new CipherInputStream(new FileInputStream(encryptedDataFilePath), outCipher);
+            byte[] keyBytes = KeyService.readBytesFromStream(cipherInputStream);
+            keyData = new String(keyBytes);
+            retVal = KeyExceptionType.SUCCESSFUL_DECODE;
+        }
+        catch (UserNotAuthenticatedException e)
+        {
+            retVal = KeyExceptionType.REQUIRES_AUTH;
+        }
+        catch (InvalidKeyException e)
+        {
+            //Wrong spec
+            retVal = KeyExceptionType.INVALID_CIPHER;
+        }
+        catch (Exception e)
+        {
+            // Other
+        }
+
+        return new Pair<>(retVal, keyData);
+    }
+
     private void createHDKey()
     {
-        HDWallet newWallet = new HDWallet(DEFAULT_KEY_STRENGTH, "");
-        boolean success = storeHDKey(newWallet, false); //create non-authenticated key initially
+        String mnemonic = generateMnemonic();
+        boolean success = storeHDKey(mnemonic, false); //create non-authenticated key initially
         if (callbackInterface != null)
             callbackInterface.HDKeyCreated(success ? currentWallet.address : null, context, authLevel);
     }
@@ -524,13 +618,13 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
      */
     private void importHDKey()
     {
+        boolean requiresAuthentication = !Utils.isRunningTest();
         //first recover the seed phrase from non-authlocked key. This removes the need to keep the seed phrase as a member on the heap
         // - making the key operation more secure
         try
         {
             String seedPhrase = unpackMnemonic();
-            HDWallet newWallet = new HDWallet(seedPhrase, "");
-            boolean success = storeHDKey(newWallet, true);
+            boolean success = storeHDKey(seedPhrase, requiresAuthentication);
             String reportAddress = success ? currentWallet.address : null;
             importCallback.walletValidated(reportAddress, KeyEncodingType.SEED_PHRASE_KEY, authLevel);
         }
@@ -581,7 +675,6 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         catch (ServiceErrorException e)
         {
             //Legacy keystore error
-            if (!BuildConfig.DEBUG) analyticsService.recordException(e);
             e.printStackTrace();
             return new UpgradeKeyResult(UpgradeKeyResultType.ERROR, e.getLocalizedMessage());
         }
@@ -592,12 +685,27 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         }
     }
 
-    private synchronized boolean storeHDKey(HDWallet newWallet, boolean keyRequiresAuthentication)
+    private synchronized boolean storeHDKey(String mnemonic, boolean keyRequiresAuthentication)
     {
-        PrivateKey pk = newWallet.getKeyForCoin(CoinType.ETHEREUM);
-        currentWallet = new Wallet(CoinType.ETHEREUM.deriveAddress(pk));
+        ECKeyPair keyPair = deriveEthereumKeyPairFromMnemonic(mnemonic);
+        String address = Numeric.prependHexPrefix(org.web3j.crypto.Keys.getAddress(keyPair));
+        currentWallet = new Wallet(address);
 
-        return storeEncryptedBytes(newWallet.mnemonic().getBytes(), keyRequiresAuthentication, currentWallet.address);
+        return storeEncryptedBytes(mnemonic.getBytes(), keyRequiresAuthentication, currentWallet.address);
+    }
+
+    private String generateMnemonic()
+    {
+        byte[] entropy = new byte[DEFAULT_KEY_STRENGTH / 8];
+        new SecureRandom().nextBytes(entropy);
+        return MnemonicUtils.generateMnemonic(entropy);
+    }
+
+    private ECKeyPair deriveEthereumKeyPairFromMnemonic(String mnemonic)
+    {
+        byte[] seed = MnemonicUtils.generateSeed(mnemonic, "");
+        Bip32ECKeyPair master = Bip32ECKeyPair.generateKeyPair(seed);
+        return Bip32ECKeyPair.deriveKeyPair(master, ETH_DERIVATION_PATH);
     }
 
     private synchronized boolean storeEncryptedBytes(byte[] data, boolean createAuthLocked, String fileName)
@@ -729,33 +837,18 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
     {
         try
         {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-            {
-                keyGenerator.init(new KeyGenParameterSpec.Builder(
-                        keyAddress,
-                        KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(BLOCK_MODE)
-                        .setKeySize(256)
-                        .setUserAuthenticationRequired(useAuthentication)
-                        .setInvalidatedByBiometricEnrollment(false)
-                        .setUserAuthenticationValidityDurationSeconds(AUTHENTICATION_DURATION_SECONDS)
-                        .setRandomizedEncryptionRequired(true)
-                        .setEncryptionPaddings(PADDING)
-                        .build());
-            }
-            else
-            {
-                keyGenerator.init(new KeyGenParameterSpec.Builder(
-                        keyAddress,
-                        KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                        .setBlockModes(BLOCK_MODE)
-                        .setKeySize(256)
-                        .setUserAuthenticationRequired(useAuthentication)
-                        .setUserAuthenticationValidityDurationSeconds(AUTHENTICATION_DURATION_SECONDS)
-                        .setRandomizedEncryptionRequired(true)
-                        .setEncryptionPaddings(PADDING)
-                        .build());
-            }
+            keyGenerator.init(new KeyGenParameterSpec.Builder(
+                    keyAddress,
+                    KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                    .setBlockModes(BLOCK_MODE)
+                    .setKeySize(256)
+                    .setUserAuthenticationRequired(useAuthentication)
+                    .setInvalidatedByBiometricEnrollment(false)
+                    .setUserAuthenticationValidityDurationSeconds(AUTHENTICATION_DURATION_SECONDS)
+                    .setRandomizedEncryptionRequired(true)
+                    .setEncryptionPaddings(PADDING)
+                    .build());
+
         }
         catch (IllegalStateException | InvalidAlgorithmParameterException e)
         {
@@ -768,7 +861,13 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
 
     private void checkAuthentication(Operation operation)
     {
-        //first check if the phone is unlocked
+        if (Utils.isRunningTest()) //running tests in debug build mode, we don't use key unlock
+        {
+            requireAuthentication = false;
+            authenticatePass(operation);
+            return;
+        }
+
         String dialogTitle;
         switch (operation)
         {
@@ -866,7 +965,7 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
                 return;
             case FINGERPRINT_NOT_VALIDATED:
                 vibrate();
-                Toast.makeText(context, R.string.fingerprint_authentication_failed, Toast.LENGTH_SHORT).show();
+                activity.runOnUiThread(() -> Toast.makeText(context, R.string.fingerprint_authentication_failed, Toast.LENGTH_SHORT).show());
                 break;
             case PIN_FAILED:
                 vibrate();
@@ -1009,6 +1108,8 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
      */
     private void createPassword(Operation operation)
     {
+        boolean requireAuthentication = !Utils.isRunningTest();
+
         //generate password
         byte[] newPassword = new byte[256];
         SecureRandom random;
@@ -1031,7 +1132,7 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
 
         random.nextBytes(newPassword);
 
-        boolean success = storeEncryptedBytes(newPassword, true, currentWallet.address);  //because we'll now only ever be importing keystore, always create with Auth if possible
+        boolean success = storeEncryptedBytes(newPassword, requireAuthentication, currentWallet.address);  //because we'll now only ever be importing keystore, always create with Auth if possible
 
         if (!success)
         {
@@ -1057,8 +1158,6 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         //2. construct credentials
         //3. sign
         SignatureFromKey returnSig = new SignatureFromKey();
-        returnSig.signature = FAILED_SIGNATURE.getBytes();
-        returnSig.sigType = SignatureReturnType.KEY_AUTHENTICATION_ERROR;
 
         try
         {
@@ -1078,13 +1177,12 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
             Credentials credentials = KeystoreAccountService.getCredentials(keyFolder, currentWallet.address, password);
             Sign.SignatureData signatureData = Sign.signMessage(
                     transactionBytes, credentials.getEcKeyPair());
-            returnSig.signature = KeystoreAccountService.bytesFromSignature(signatureData);
+            returnSig.signature = bytesFromSignature(signatureData);
             returnSig.sigType = SignatureReturnType.SIGNATURE_GENERATED; //only reach here if signature was generated correctly
         }
         catch (ServiceErrorException e)
         {
             //Legacy keystore error
-            if (!BuildConfig.DEBUG) analyticsService.recordException(e);
             returnSig.failMessage = e.getMessage();
             e.printStackTrace();
         }
@@ -1101,14 +1199,12 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
             Utility methods
      */
 
-    static byte[] readBytesFromFile(String path)
+    public static byte[] readBytesFromFile(String path)
     {
         byte[] bytes = null;
-        FileInputStream fin;
-        try
+        File file = new File(path);
+        try (FileInputStream fin = new FileInputStream(file))
         {
-            File file = new File(path);
-            fin = new FileInputStream(file);
             bytes = readBytesFromStream(fin);
         }
         catch (IOException e)
@@ -1116,6 +1212,22 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
             e.printStackTrace();
         }
         return bytes;
+    }
+
+    public static byte[] readBytesFromStream(InputStream in) throws IOException
+    {
+        ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
+        int bufferSize = 2048;
+        byte[] buffer = new byte[bufferSize];
+
+        int len;
+        while ((len = in.read(buffer)) != -1)
+        {
+            byteBuffer.write(buffer, 0, len);
+        }
+
+        byteBuffer.close();
+        return byteBuffer.toByteArray();
     }
 
     /**
@@ -1149,7 +1261,7 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
         return keyAddress;
     }
 
-    synchronized static String getFilePath(Context context, String fileName)
+    public synchronized static String getFilePath(Context context, String fileName)
     {
         //check for matching file
         File check = new File(context.getFilesDir(), fileName);
@@ -1175,85 +1287,18 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
 
     private boolean writeBytesToFile(String path, byte[] data)
     {
-        FileOutputStream fos = null;
-        try
+        File file = new File(path);
+        try (FileOutputStream fos = new FileOutputStream(file))
         {
-            File file = new File(path);
-            fos = new FileOutputStream(file);
-            // Writes bytes from the specified byte array to this file output stream
             fos.write(data);
-            return true;
-        }
-        catch (FileNotFoundException e)
-        {
-            Timber.d("File not found" + e);
-        }
-        catch (IOException ioe)
-        {
-            Timber.d(ioe, "Exception while writing file ");
-        }
-        finally
-        {
-            // close the streams using close method
-            try
-            {
-                if (fos != null)
-                {
-                    fos.close();
-                }
-            }
-            catch (IOException ioe)
-            {
-                Timber.d("Error while closing stream: " + ioe);
-            }
-        }
-        return false;
-    }
-
-    static byte[] readBytesFromStream(InputStream in)
-    {
-        // this dynamically extends to take the bytes you read
-        ByteArrayOutputStream byteBuffer = new ByteArrayOutputStream();
-        // this is storage overwritten on each iteration with bytes
-        int bufferSize = 1024;
-        byte[] buffer = new byte[bufferSize];
-        // we need to know how may bytes were read to write them to the byteBuffer
-        int len;
-        try
-        {
-            while ((len = in.read(buffer)) != -1)
-            {
-                byteBuffer.write(buffer, 0, len);
-            }
         }
         catch (IOException e)
         {
-            e.printStackTrace();
+            Timber.d(e, "Exception while writing file ");
+            return false;
         }
-        finally
-        {
-            try
-            {
-                byteBuffer.close();
-            }
-            catch (IOException e)
-            {
-                e.printStackTrace();
-            }
-            if (in != null)
-            {
-                try
-                {
-                    in.close();
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
-                }
-            }
-        }
-        // and then we can return your byte array.
-        return byteBuffer.toByteArray();
+
+        return true;
     }
 
     /**
@@ -1388,5 +1433,32 @@ public class KeyService implements AuthenticationCallback, PinAuthenticationCall
                 vb.vibrate(200);
             }
         }
+    }
+
+    public boolean hasKeystore(String walletAddress)
+    {
+        try
+        {
+            KeyStore keyStore = KeyStore.getInstance(ANDROID_KEY_STORE);
+            keyStore.load(null);
+            String matchingAddr = findMatchingAddrInKeyStore(walletAddress);
+            return keyStore.containsAlias(matchingAddr);
+        }
+        catch (KeyStoreException|NoSuchAlgorithmException|CertificateException|IOException e)
+        {
+            Timber.e(e);
+        }
+
+        return false;
+    }
+
+    static boolean hasStrongbox()
+    {
+        return securityStatus == SecurityStatus.HAS_STRONGBOX;
+    }
+
+    public enum KeyExceptionType
+    {
+        UNKNOWN, REQUIRES_AUTH, INVALID_CIPHER, SUCCESSFUL_DECODE, IV_NOT_FOUND, ENCRYPTED_FILE_NOT_FOUND
     }
 }

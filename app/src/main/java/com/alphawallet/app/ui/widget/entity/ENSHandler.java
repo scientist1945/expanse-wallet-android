@@ -4,23 +4,22 @@ package com.alphawallet.app.ui.widget.entity;
  * Created by JB on 28/10/2020.
  */
 
+import static com.alphawallet.app.util.ens.EnsResolver.USE_ENS_CHAIN;
+import static com.alphawallet.app.util.ens.EnsResolver.CANCELLED_REQUEST;
+
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.Editable;
 import android.text.TextUtils;
-import android.text.TextWatcher;
-import android.util.TypedValue;
 
 import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 
 import com.alphawallet.app.C;
 import com.alphawallet.app.R;
-import com.alphawallet.app.entity.EnsNodeNotSyncCallback;
 import com.alphawallet.app.repository.TokenRepository;
 import com.alphawallet.app.ui.widget.adapter.AutoCompleteAddressAdapter;
-import com.alphawallet.app.util.AWEnsResolver;
+import com.alphawallet.app.util.ens.AWEnsResolver;
 import com.alphawallet.app.util.Utils;
 import com.alphawallet.app.widget.InputAddress;
 import com.google.gson.Gson;
@@ -34,9 +33,6 @@ import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
-import timber.log.Timber;
-
-import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
 
 /**
  * Created by James on 4/12/2018.
@@ -66,7 +62,7 @@ public class ENSHandler implements Runnable
         this.handler = new Handler(Looper.getMainLooper());
         this.adapterUrl = adapter;
         this.host = host;
-        this.ensResolver = new AWEnsResolver(TokenRepository.getWeb3jService(MAINNET_ID), host.getContext());
+        this.ensResolver = new AWEnsResolver(TokenRepository.getWeb3jService(USE_ENS_CHAIN), host.getContext(), host.getChain());
 
         createWatcher();
         getENSHistoryFromPrefs(host.getContext());
@@ -195,13 +191,13 @@ public class ENSHandler implements Runnable
 
     public static boolean couldBeENS(String address)
     {
-        if (address == null || address.length() == 0) return false;
+        if (address == null || address.isEmpty()) return false;
 
         String[] split = address.split("[.]");
         if (split.length > 1)
         {
             String extension = split[split.length - 1];
-            return extension.length() > 0 && Utils.isAlNum(extension);
+            return !extension.isEmpty() && Utils.isAlNum(extension);
         }
 
         return false;
@@ -223,17 +219,27 @@ public class ENSHandler implements Runnable
             disposable = ensResolver.reverseResolveEns(to)
                     .subscribeOn(Schedulers.io())
                     .observeOn(AndroidSchedulers.mainThread())
-                    .subscribe(resolvedAddress -> onENSSuccess(resolvedAddress, to), this::onENSError);
+                    .subscribe(resolvedAddress -> {
+                        if (!resolvedAddress.equals(CANCELLED_REQUEST))
+                        {
+                            onENSSuccess(resolvedAddress, to);
+                        }
+                    }, this::onENSError);
         }
         else if (canBeENSName(to))
         {
             host.setWaitingSpinner(true);
             host.ENSName(to);
 
-            disposable = ensResolver.resolveENSAddress(to, performEnsSync)
+            disposable = ensResolver.resolveENSAddress(to)
                     .subscribeOn(Schedulers.io())
                     .observeOn(AndroidSchedulers.mainThread())
-                    .subscribe(resolvedAddress -> onENSSuccess(resolvedAddress, to), this::onENSError);
+                    .subscribe(resolvedAddress -> {
+                        if (!resolvedAddress.equals(CANCELLED_REQUEST))
+                        {
+                            onENSSuccess(resolvedAddress, to);
+                        }
+                    }, this::onENSError);
         }
         else
         {
@@ -335,9 +341,9 @@ public class ENSHandler implements Runnable
         PreferenceManager.getDefaultSharedPreferences(host.getContext()).edit().putString(C.ENS_HISTORY_PAIR, historyJson).apply();
     }
 
-    public void setEnsNodeNotSyncCallback(EnsNodeNotSyncCallback callback)
+    /*public void setEnsNodeNotSyncCallback(EnsNodeNotSyncCallback callback)
     {
         Timber.d("setEnsNodeNotSyncCallback: ");
         ensResolver.nodeNotSyncCallback = callback;
-    }
+    }*/
 }
