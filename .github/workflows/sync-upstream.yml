@@ -1,9 +1,9 @@
 name: Sync with AlphaWallet Upstream
 
 on:
-  workflow_dispatch: # Permite ejecutarlo manualmente con un botón en GitHub
+  workflow_dispatch:
   schedule:
-    - cron: '0 6 * * 1' # Se ejecuta cada lunes a las 06:00 UTC
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: write
@@ -40,21 +40,28 @@ jobs:
 
           git checkout -b "$BRANCH_NAME"
 
-          # Intentar merge sin autocommit para inspeccionar el estado
           if git merge upstream/master --no-commit --no-ff; then
             echo "CONFLICTS=false" >> $GITHUB_ENV
-            git commit -m "chore: sync with AlphaWallet upstream ($(date +'%Y-%m-%d'))"
           else
             echo "CONFLICTS=true" >> $GITHUB_ENV
-            # Registrar los archivos en conflicto antes de confirmar el estado para el PR
+          fi
+
+          # Mantener intactos los workflows propios de Expanse para evitar bloqueo de GITHUB_TOKEN
+          git reset HEAD .github/workflows/ || true
+          git checkout -- .github/workflows/ || true
+          git clean -fd .github/workflows/ || true
+
+          if [ "$CONFLICTS" = "true" ]; then
             CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
             echo "CONFLICT_FILES<<EOF" >> $GITHUB_ENV
             echo "$CONFLICT_FILES" >> $GITHUB_ENV
             echo "EOF" >> $GITHUB_ENV
 
-            # Marcar conflictos para revisión manual en el PR
             git add .
             git commit -m "chore: sync with AlphaWallet upstream (requiere revisión de conflictos)"
+          else
+            git add .
+            git commit -m "chore: sync with AlphaWallet upstream ($(date +'%Y-%m-%d'))"
           fi
 
           git push -u origin "$BRANCH_NAME" --force
