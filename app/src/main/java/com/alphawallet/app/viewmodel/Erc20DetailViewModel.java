@@ -1,5 +1,8 @@
 package com.alphawallet.app.viewmodel;
 
+import static com.alphawallet.token.tools.TokenDefinition.NO_SCRIPT;
+import static com.alphawallet.token.tools.TokenDefinition.UNCHANGED_SCRIPT;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -33,9 +36,8 @@ import io.realm.Realm;
 
 @HiltViewModel
 public class Erc20DetailViewModel extends BaseViewModel {
-    private final MutableLiveData<ActivityMeta[]> transactions = new MutableLiveData<>();
     private final MutableLiveData<XMLDsigDescriptor> sig = new MutableLiveData<>();
-    private final MutableLiveData<Boolean> newScriptFound = new MutableLiveData<>();
+    private final MutableLiveData<TokenDefinition> newScriptFound = new MutableLiveData<>();
     private final MutableLiveData<Boolean> scriptUpdateInProgress = new MutableLiveData<>();
 
     private final MyAddressRouter myAddressRouter;
@@ -66,7 +68,7 @@ public class Erc20DetailViewModel extends BaseViewModel {
         return sig;
     }
 
-    public LiveData<Boolean> newScriptFound()
+    public LiveData<TokenDefinition> newScriptFound()
     {
         return newScriptFound;
     }
@@ -114,7 +116,7 @@ public class Erc20DetailViewModel extends BaseViewModel {
 
     public void checkTokenScriptValidity(Token token)
     {
-        disposable = assetDefinitionService.getSignatureData(token.tokenInfo.chainId, token.tokenInfo.address)
+        disposable = assetDefinitionService.getSignatureData(token)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(sig::postValue, this::onSigCheckError);
@@ -135,18 +137,23 @@ public class Erc20DetailViewModel extends BaseViewModel {
         scriptUpdate = assetDefinitionService.checkServerForScript(token, scriptUpdateInProgress)
                 .observeOn(Schedulers.io())
                 .subscribeOn(Schedulers.single())
-                .subscribe(this::handleFilename, e -> scriptUpdateInProgress.postValue(false));
+                .subscribe(this::handleDefinition, e -> scriptUpdateInProgress.postValue(false));
     }
 
-    private void handleFilename(TokenDefinition td)
+    private void handleDefinition(TokenDefinition td)
     {
-        if (!TextUtils.isEmpty(td.holdingToken))
+        switch (td.nameSpace)
         {
-            newScriptFound.postValue(true);
-        }
-        else
-        {
-            scriptUpdateInProgress.postValue(false);
+            case UNCHANGED_SCRIPT:
+                td.nameSpace = UNCHANGED_SCRIPT;
+                newScriptFound.postValue(td);
+                break;
+            case NO_SCRIPT:
+                scriptUpdateInProgress.postValue(false);
+                break;
+            default:
+                newScriptFound.postValue(td);
+                break;
         }
     }
 

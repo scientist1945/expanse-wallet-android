@@ -24,6 +24,7 @@ public class TokenScriptFile extends File
     private boolean active;
     private boolean resourceFile;
     private String fileName;
+    private String scriptUrl;
 
     public TokenScriptFile(Context ctx)
     {
@@ -90,18 +91,31 @@ public class TokenScriptFile extends File
         return null;
     }
 
+    public void setScriptUrl(String scriptUrl)
+    {
+        this.scriptUrl = scriptUrl;
+    }
+
+    public String getScriptUrl()
+    {
+        return this.scriptUrl;
+    }
+
     public boolean isValidTokenScript()
     {
         return active || resourceFile;
     }
 
-
     public String calcMD5()
+    {
+        return calcMD5(getInputStream());
+    }
+
+    public static String calcMD5(InputStream fis)
     {
         StringBuilder sb = new StringBuilder();
         try
         {
-            InputStream fis = getInputStream();
             MessageDigest digest = MessageDigest.getInstance("MD5");
 
             byte[] byteArray = new byte[1024];
@@ -124,6 +138,10 @@ public class TokenScriptFile extends File
         {
             String rand = String.valueOf(new Random(System.currentTimeMillis()).nextInt());
             sb.append(rand); //never matches
+        }
+        catch (Exception e)
+        {
+            Timber.w(e);
         }
 
         //return complete hash
@@ -152,42 +170,17 @@ public class TokenScriptFile extends File
     public void determineSignatureType(XMLDsigDescriptor sigDescriptor)
     {
         boolean isDebug = isDebug();
-        if (sigDescriptor.result.equals("pass"))
-        {
-            if (isDebug) sigDescriptor.type = SigReturnType.DEBUG_SIGNATURE_PASS;
-            else sigDescriptor.type = SigReturnType.SIGNATURE_PASS;
-        }
-        else
-        {
-            setFailedIssuer(isDebug, sigDescriptor);
-        }
-    }
-
-    private void setFailedIssuer(boolean isDebug, XMLDsigDescriptor sigDescriptor)
-    {
+        String keyName;
         if (isDebug)
         {
-            sigDescriptor.keyName = context.getString(R.string.debug_script);
+            keyName = context.getString(R.string.debug_script);
         }
         else
         {
-            sigDescriptor.keyName = context.getString(R.string.unsigned_script);
+            keyName = context.getString(R.string.unsigned_script);
         }
 
-        if (sigDescriptor.subject != null && sigDescriptor.subject.contains("Invalid"))
-        {
-            if (isDebug)
-                sigDescriptor.type = SigReturnType.DEBUG_SIGNATURE_INVALID;
-            else
-                sigDescriptor.type = SigReturnType.SIGNATURE_INVALID;
-        }
-        else
-        {
-            if (isDebug)
-                sigDescriptor.type = SigReturnType.DEBUG_NO_SIGNATURE;
-            else
-                sigDescriptor.type = SigReturnType.NO_SIGNATURE;
-        }
+        sigDescriptor.setKeyDetails(isDebug, keyName);
     }
 
     public boolean fileChanged(String fileHash)

@@ -38,7 +38,6 @@ public class WalletHolder extends BinderViewHolder<Wallet> implements View.OnCli
     public static final String IS_SYNCED = "is_syncing";
 	public static final String FIAT_VALUE = "fiat_value";
 	public static final String FIAT_CHANGE = "fiat_change";
-    public static final String IS_MAINNET_ACTIVE = "is_mainnet_active";
     private final LinearLayout manageWalletLayout;
 	private final ImageView manageWalletBtn;
 	private final UserAvatar walletIcon;
@@ -223,6 +222,7 @@ public class WalletHolder extends BinderViewHolder<Wallet> implements View.OnCli
 	}
 
 	@Override
+<<<<<<< HEAD
 	public void onClick(View view) {
         if (view.getId() == R.id.wallet_click_layer)
         {
@@ -236,6 +236,22 @@ public class WalletHolder extends BinderViewHolder<Wallet> implements View.OnCli
             intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             getContext().startActivity(intent);
         }
+=======
+	public void onClick(View view)
+	{
+		if (view.getId() == R.id.wallet_click_layer)
+		{
+			clickCallback.onWalletClicked(wallet);
+		}
+		else if (view.getId() == R.id.wallet_click_layer)
+		{
+			Intent intent = new Intent(getContext(), WalletActionsActivity.class);
+			intent.putExtra("wallet", wallet);
+			intent.putExtra("currency", wallet.balanceSymbol);
+			intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+			getContext().startActivity(intent);
+		}
+>>>>>>> upstream/master
 	}
 
 	@Override

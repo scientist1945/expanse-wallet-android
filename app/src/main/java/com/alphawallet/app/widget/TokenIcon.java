@@ -1,15 +1,21 @@
 package com.alphawallet.app.widget;
 
 import static androidx.core.content.ContextCompat.getColorStateList;
+import static com.alphawallet.app.util.Utils.ALPHAWALLET_REPO_NAME;
+import static com.alphawallet.app.util.Utils.TRUST_ICON_REPO_BASE;
+import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.res.TypedArray;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.AttributeSet;
-import android.util.Pair;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
@@ -17,19 +23,20 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.lifecycle.ViewModelStoreOwner;
 
 import com.alphawallet.app.R;
+import com.alphawallet.app.entity.tokendata.TokenGroup;
 import com.alphawallet.app.entity.tokens.Token;
 import com.alphawallet.app.repository.CurrencyRepository;
 import com.alphawallet.app.repository.EthereumNetworkBase;
 import com.alphawallet.app.repository.EthereumNetworkRepository;
-import com.alphawallet.app.service.AssetDefinitionService;
 import com.alphawallet.app.service.TickerService;
-import com.alphawallet.app.service.TokensService;
 import com.alphawallet.app.ui.widget.TokensAdapterCallback;
-import com.alphawallet.app.ui.widget.entity.IconItem;
 import com.alphawallet.app.ui.widget.entity.StatusType;
 import com.alphawallet.app.util.Utils;
+import com.alphawallet.app.viewmodel.TokenIconViewModel;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.DataSource;
 import com.bumptech.glide.load.engine.GlideException;
@@ -40,26 +47,62 @@ import com.bumptech.glide.request.target.DrawableImageViewTarget;
 import com.bumptech.glide.request.target.Target;
 
 import org.jetbrains.annotations.NotNull;
-import org.web3j.crypto.Keys;
+
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.schedulers.Schedulers;
 
 public class TokenIcon extends ConstraintLayout
 {
     private final ImageView icon;
+    private final ImageView iconSecondary;
     private final TextView textIcon;
     private final ImageView statusIcon;
+    private final ImageView circle;
     private final ProgressBar pendingProgress;
     private final ImageView statusBackground;
     private final ImageView chainIcon;
     private final ImageView chainIconBackground;
-
-    private TokensAdapterCallback tokensAdapterCallback;
-    private Token token;
-    private String tokenName;
-    private StatusType currentStatus;
-    private String fallbackIconUrl;
-    private Request currentRq;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final boolean squareToken;
+    private TokensAdapterCallback tokensAdapterCallback;
+    private volatile Token token;
+    private final TokenIconViewModel viewModel;
+    @Nullable
+    private Disposable disposable;
+    private String tokenName;
+    private StatusType currentStatus;
+    private Request currentRq;
+    /**
+     * Prevent glide dumping log errors - it is expected that load will fail
+     */
+    private final RequestListener<Drawable> requestListener = new RequestListener<>()
+    {
+        @Override
+        public boolean onLoadFailed(@Nullable GlideException e, Object model, Target<Drawable> target, boolean isFirstResource)
+        {
+            loadFromAltRepo(model);
+            return false;
+        }
+
+        @Override
+        public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource)
+        {
+            if (model == null) return false;
+            if (token != null)
+            {
+                viewModel.storeImageUrl(token.tokenInfo.chainId, token.tokenInfo.address, model.toString());
+            }
+
+            handler.post(() -> {
+                textIcon.setVisibility(View.GONE);
+                iconSecondary.setVisibility(View.VISIBLE);
+                iconSecondary.setImageDrawable(resource);
+            });
+
+            return false;
+        }
+    };
 
     public TokenIcon(Context context, AttributeSet attrs)
     {
@@ -70,14 +113,17 @@ public class TokenIcon extends ConstraintLayout
         inflate(context, squareToken ? R.layout.item_token_icon_square : R.layout.item_token_icon, this);
 
         icon = findViewById(R.id.icon);
+        iconSecondary = findViewById(R.id.icon_secondary);
         textIcon = findViewById(R.id.text_icon);
         statusIcon = findViewById(R.id.status_icon);
+        circle = findViewById(R.id.circle);
         pendingProgress = findViewById(R.id.pending_progress);
         statusBackground = findViewById(R.id.status_icon_background);
         statusIcon.setVisibility(isInEditMode() ? View.VISIBLE : View.GONE);
         currentStatus = StatusType.NONE;
         chainIcon = findViewById(R.id.status_chain_icon);
         chainIconBackground = findViewById(R.id.chain_icon_background);
+        viewModel = new ViewModelProvider((ViewModelStoreOwner) getActivity()).get(TokenIconViewModel.class);
 
         bindViews();
     }
@@ -85,9 +131,9 @@ public class TokenIcon extends ConstraintLayout
     private boolean getViewId(Context context, AttributeSet attrs)
     {
         TypedArray a = context.getTheme().obtainStyledAttributes(
-                attrs,
-                R.styleable.TokenIcon,
-                0, 0
+            attrs,
+            R.styleable.TokenIcon,
+            0, 0
         );
 
         boolean sq;
@@ -112,30 +158,32 @@ public class TokenIcon extends ConstraintLayout
 
     public void clearLoad()
     {
+        iconSecondary.setVisibility(View.INVISIBLE);
         handler.removeCallbacks(null);
         if (currentRq != null && currentRq.isRunning())
         {
+            currentRq.pause();
             currentRq.clear();
+            currentRq = null;
             handler.removeCallbacksAndMessages(null);
+            token = null;
+        }
+
+        if (disposable != null && !disposable.isDisposed())
+        {
+            disposable.dispose();
         }
     }
 
     /**
      * This method is necessary to call from the binder to show information correctly.
      *
-     * @param token Token object
-     * @param assetDefinition Asset Definition Service for Icons
+     * @param token           Token object
      */
-    public void bindData(Token token, @NotNull AssetDefinitionService assetDefinition)
+    public void bindData(Token token)
     {
-        if (token == null || (this.token != null && this.token.equals(token))) //stop update flicker
-        {
-            return;
-        }
-        else
-        {
-            this.token = token;
-        }
+        this.token = token;
+        clearLoad();
 
         if (token.isEthereum())
         {
@@ -143,45 +191,45 @@ public class TokenIcon extends ConstraintLayout
             return;
         }
 
-        this.tokenName = token.getName(assetDefinition, token.getTokenCount());
-        Pair<String, Boolean> iconFallback = assetDefinition.getFallbackUrlForToken(token);
-        String mainIcon = iconFallback.second ? iconFallback.first : getPrimaryIconURL(token);
-        this.fallbackIconUrl = iconFallback.second ? getPrimaryIconURL(token) : iconFallback.first;
-        bind(token, new IconItem(mainIcon, token.tokenInfo.chainId, token.getAddress()));
-    }
-
-    public void bindData(Token token)
-    {
-        if (token == null) return;
-        this.tokenName = token.getName();
-        this.fallbackIconUrl = Utils.getTWTokenImageUrl(token.tokenInfo.chainId, token.getAddress());
-        bind(token, getIconUrl(token));
+        if (token.group == TokenGroup.SPAM)
+        {
+            bindSpam(token);
+        }
+        else
+        {
+            this.tokenName = viewModel.getTokenName(token);
+            String mainIcon = viewModel.getTokenIcon(token);
+            bind(token, mainIcon);
+        }
     }
 
     public void bindData(long chainId)
     {
+        clearLoad();
         loadImageFromResource(EthereumNetworkRepository.getChainLogo(chainId));
     }
 
-    public void bindData(Token token, @NotNull TokensService svs)
+    private void bind(Token token, String iconUrl)
     {
-        this.handler.removeCallbacks(null);
-        if (token == null) return;
-        this.tokenName = token.getName();
-        this.fallbackIconUrl = svs.getFallbackUrlForToken(token);
-        bind(token, getIconUrl(token));
+        bindCommon(token);
+        displayTokenIcon(iconUrl);
     }
 
-    private void bind(Token token, IconItem iconItem)
+    private void bindSpam(Token token)
+    {
+        bindCommon(token);
+        setSpam();
+    }
+
+    private void bindCommon(Token token)
     {
         this.handler.removeCallbacks(null);
         this.token = token;
 
+        iconSecondary.setVisibility(View.INVISIBLE);
         statusBackground.setVisibility(View.GONE);
         chainIconBackground.setVisibility(View.GONE);
         chainIcon.setVisibility(View.GONE);
-
-        displayTokenIcon(iconItem);
     }
 
     public void setChainIcon(long chainId)
@@ -189,6 +237,13 @@ public class TokenIcon extends ConstraintLayout
         chainIconBackground.setVisibility(View.VISIBLE);
         chainIcon.setVisibility(View.VISIBLE);
         chainIcon.setImageResource(EthereumNetworkRepository.getSmallChainLogo(chainId));
+    }
+
+    public void setSpam()
+    {
+        textIcon.setVisibility(View.GONE);
+        icon.setImageResource(R.drawable.ic_spam_token);
+        circle.setVisibility(View.GONE);
     }
 
     private void setupDefaultIcon()
@@ -206,42 +261,18 @@ public class TokenIcon extends ConstraintLayout
     /**
      * Try to fetch Token Icon from the Token URL.
      */
-    private void displayTokenIcon(IconItem iconItem)
+    private void displayTokenIcon(String iconUrl)
     {
         setupDefaultIcon();
 
-        if (token.isEthereum()
-                || token.getWallet().equalsIgnoreCase(token.getAddress())
-                || iconItem.useTextSymbol()) return;
+        final RequestOptions optionalCircleCrop = squareToken || iconUrl.startsWith(ALPHAWALLET_REPO_NAME) ? new RequestOptions() : new RequestOptions().circleCrop();
 
-        if (iconItem.usePrimary())
-        {
-            final RequestOptions optionalCircleCrop = squareToken || iconItem.getUrl().startsWith(Utils.ALPHAWALLET_REPO_NAME) ? new RequestOptions() : new RequestOptions().circleCrop();
-
-            currentRq = Glide.with(this)
-                    .load(iconItem.getUrl())
-                    .placeholder(R.drawable.ic_token_eth)
-                    .apply(optionalCircleCrop)
-                    .listener(requestListener)
-                    .into(new DrawableImageViewTarget(icon)).getRequest();
-        }
-        else
-        {
-            loadFromAltRepo();
-        }
-    }
-
-    private String getPrimaryIconURL(Token token)
-    {
-        String correctedAddr = Keys.toChecksumAddress(token.getAddress());
-        return Utils.getTokenImageUrl(correctedAddr);
-    }
-
-    private IconItem getIconUrl(Token token)
-    {
-        String correctedAddr = Keys.toChecksumAddress(token.getAddress());
-        String tURL = Utils.getTokenImageUrl(correctedAddr);
-        return new IconItem(tURL, token.tokenInfo.chainId, token.getAddress());
+        currentRq = Glide.with(this)
+                .load(iconUrl)
+                .placeholder(R.drawable.ic_token_eth)
+                .apply(optionalCircleCrop)
+                .listener(requestListener)
+                .into(new DrawableImageViewTarget(icon)).getRequest();
     }
 
     public void setStatusIcon(StatusType type)
@@ -281,22 +312,56 @@ public class TokenIcon extends ConstraintLayout
     /**
      * Attempt to load the icon from the Database icon or TW icon repo
      */
-    private void loadFromAltRepo()
+    private void loadFromAltRepo(Object model)
     {
-        if (!Utils.stillAvailable(getContext()) || this.fallbackIconUrl == null) return;
+        //check how to load from alt repo or ignore
+        String checkUrl = model != null ? model.toString() : null;
+        if (!Utils.stillAvailable(getContext()) || token == null || TextUtils.isEmpty(checkUrl))
+        {
+            return;
+        }
 
+        //check heuristic:
+        //1. If it's the AW iconassets repo then check using contract URI
+        //2. If it's not Trust repo URL then check using Trust repo
+        //3. If it is the Trust repo then stop
+
+        boolean useContractURI;
+
+        if (checkUrl.startsWith(ALPHAWALLET_REPO_NAME))
+        {
+            useContractURI = true;
+        }
+        else if (!checkUrl.startsWith(TRUST_ICON_REPO_BASE))
+        {
+            useContractURI = false;
+        }
+        else
+        {
+            return; //we checked Trust repo, this is the final check
+        }
+
+        disposable = viewModel.getIconFallback(token, useContractURI)
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(this::loadImageAlt);
+    }
+
+    private void loadImageAlt(String fileUri)
+    {
         final RequestOptions optionalCircleCrop = squareToken ? new RequestOptions() : new RequestOptions().circleCrop();
 
         currentRq = Glide.with(this)
-                .load(this.fallbackIconUrl)
-                .placeholder(R.drawable.ic_token_eth)
+                .load(fileUri)
                 .apply(optionalCircleCrop)
-                .listener(requestListenerTW)
-                .into(new DrawableImageViewTarget(icon)).getRequest();
+                .listener(requestListener)
+                .into(new DrawableImageViewTarget(iconSecondary)).getRequest();
     }
+
 
     /**
      * This method is used to set TextIcon and make Icon hidden as there is no icon available for the token.
+     *
      * @param token Token
      */
     private void setupTextIcon(@NotNull Token token)
@@ -315,6 +380,13 @@ public class TokenIcon extends ConstraintLayout
         }
     }
 
+    public void setupFallbackTextIcon(String name)
+    {
+        textIcon.setText(name);
+        textIcon.setVisibility(View.VISIBLE);
+        textIcon.setBackgroundTintList(getColorStateList(getContext(), EthereumNetworkBase.getChainColour(MAINNET_ID)));
+    }
+
     public void setOnTokenClickListener(TokensAdapterCallback tokensAdapterCallback)
     {
         this.tokensAdapterCallback = tokensAdapterCallback;
@@ -327,54 +399,6 @@ public class TokenIcon extends ConstraintLayout
             tokensAdapterCallback.onTokenClick(v, token, null, true);
         }
     }
-
-    /**
-     * Prevent glide dumping log errors - it is expected that load will fail
-     */
-    private final RequestListener<Drawable> requestListener = new RequestListener<Drawable>() {
-        @Override
-        public boolean onLoadFailed(@Nullable GlideException e, Object model, Target<Drawable> target, boolean isFirstResource) {
-            if (model == null || token == null || !model.toString().toLowerCase().contains(token.getAddress())) return false;
-            handler.post(() -> loadFromAltRepo());
-            return false;
-        }
-
-        @Override
-        public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource) {
-            textIcon.setVisibility(View.GONE);
-            icon.setVisibility(View.VISIBLE);
-            icon.setImageDrawable(resource);
-            return false;
-        }
-    };
-
-    private final RequestListener<Drawable> requestListenerTW = new RequestListener<Drawable>() {
-        @Override
-        public boolean onLoadFailed(@Nullable GlideException e, Object model, Target<Drawable> target, boolean isFirstResource)
-        {
-            if (model == null || token == null || !model.toString().toLowerCase().contains(token.getAddress())) return false;
-            if (token != null)
-            {
-                IconItem.noIconFound(token.tokenInfo.chainId, token.getAddress()); //don't try to load this asset again for this session
-            }
-            return false;
-        }
-
-        @Override
-        public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource) {
-            if (model == null) return false;
-            if (token != null)
-            {
-                IconItem.secondaryFound(token.tokenInfo.chainId, token.getAddress());
-            }
-            if (token == null || !model.toString().toLowerCase().contains(token.getAddress())) return false;
-
-            textIcon.setVisibility(View.GONE);
-            icon.setVisibility(View.VISIBLE);
-            icon.setImageDrawable(resource);
-            return false;
-        }
-    };
 
     public void showLocalCurrency()
     {
@@ -389,13 +413,76 @@ public class TokenIcon extends ConstraintLayout
         statusBackground.setVisibility(View.GONE);
         chainIconBackground.setVisibility(View.GONE);
         chainIcon.setVisibility(View.GONE);
-
         textIcon.setVisibility(View.GONE);
+        icon.setImageResource(resourceId);
+        icon.setVisibility(View.VISIBLE);
+        circle.setVisibility(View.VISIBLE);
+    }
+
+    public void setGrayscale(boolean grayscale)
+    {
+        if (grayscale)
+        {
+            ColorMatrix matrix = new ColorMatrix();
+            matrix.setSaturation(0);
+            ColorMatrixColorFilter cf = new ColorMatrixColorFilter(matrix);
+            icon.setColorFilter(cf);
+            icon.setImageAlpha(128);
+        }
+        else
+        {
+            icon.setColorFilter(null);
+            icon.setImageAlpha(255);
+        }
+    }
+
+    private void setIsAttestation(String symbol, long chainId)
+    {
+        loadImageFromResource(R.drawable.zero_one);
+        textIcon.setVisibility(View.VISIBLE);
+        textIcon.setBackgroundResource(0);
+        textIcon.setText(Utils.getIconisedText(symbol));
+        setChainIcon(chainId);
+    }
+
+    public void setSmartPassIcon(long chainId)
+    {
         currentRq = Glide.with(this)
-                .load(resourceId)
+                .load(R.drawable.smart_pass)
+                .apply(new RequestOptions().circleCrop())
                 .listener(requestListener)
                 .into(new DrawableImageViewTarget(icon)).getRequest();
-        icon.setVisibility(View.VISIBLE);
-        findViewById(R.id.circle).setVisibility(View.VISIBLE);
+        setChainIcon(chainId);
+    }
+
+    public void setAttestationIcon(String image, String symbol, long chain)
+    {
+        if (!TextUtils.isEmpty(image))
+        {
+            currentRq = Glide.with(this)
+                    .load(image)
+                    .placeholder(R.drawable.zero_one)
+                    .apply(new RequestOptions().circleCrop())
+                    .listener(requestListener)
+                    .into(new DrawableImageViewTarget(icon)).getRequest();
+        }
+        else
+        {
+            setIsAttestation(symbol, chain);
+        }
+    }
+
+    private Activity getActivity()
+    {
+        Context context = getContext();
+        while (context instanceof ContextWrapper)
+        {
+            if (context instanceof Activity)
+            {
+                return (Activity) context;
+            }
+            context = ((ContextWrapper) context).getBaseContext();
+        }
+        return null;
     }
 }

@@ -12,10 +12,23 @@ import android.os.Bundle;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.preference.PreferenceManager;
 
+<<<<<<< HEAD
 import com.alphawallet.app.util.TimberInit;
 
 import java.util.EmptyStackException;
 import java.util.Stack;
+=======
+import com.alphawallet.app.repository.RpcConfigRepository;
+import com.alphawallet.app.service.AWHttpServiceWaterfall;
+import com.alphawallet.app.service.RPCRankingManager;
+import com.alphawallet.app.util.TimberInit;
+import com.alphawallet.app.walletconnect.AWWalletConnectClient;
+
+import java.util.EmptyStackException;
+import java.util.Stack;
+
+import javax.inject.Inject;
+>>>>>>> upstream/master
 
 import dagger.hilt.android.HiltAndroidApp;
 import io.reactivex.plugins.RxJavaPlugins;
@@ -25,6 +38,18 @@ import timber.log.Timber;
 @HiltAndroidApp
 public class App extends Application
 {
+<<<<<<< HEAD
+=======
+    @Inject
+    AWWalletConnectClient awWalletConnectClient;
+
+    @Inject
+    RPCRankingManager rpcRankingManager;
+
+    @Inject
+    RpcConfigRepository rpcConfigRepository;
+
+>>>>>>> upstream/master
     private static App mInstance;
     private final Stack<Activity> activityStack = new Stack<>();
 
@@ -82,6 +107,25 @@ public class App extends Application
 
         RxJavaPlugins.setErrorHandler(Timber::e);
 
+<<<<<<< HEAD
+=======
+        // Initialise static network RPC config before anything accesses EthereumNetworkBase.
+        rpcConfigRepository.initialiseFromDisk();
+
+        // Initialize RPC ranking system and trigger startup stale check
+        AWHttpServiceWaterfall.setRankingManager(rpcRankingManager);
+        rpcRankingManager.checkAndUpdateRPCs();
+
+        try
+        {
+            awWalletConnectClient.init(this);
+        }
+        catch (Exception e)
+        {
+            Timber.tag("WalletConnect").e(e);
+        }
+
+>>>>>>> upstream/master
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks()
         {
             @Override
@@ -127,6 +171,13 @@ public class App extends Application
     public void onTrimMemory(int level)
     {
         super.onTrimMemory(level);
+<<<<<<< HEAD
+=======
+        if (awWalletConnectClient != null)
+        {
+            awWalletConnectClient.shutdown();
+        }
+>>>>>>> upstream/master
     }
 
     @Override
@@ -134,6 +185,13 @@ public class App extends Application
     {
         super.onTerminate();
         activityStack.clear();
+<<<<<<< HEAD
+=======
+        if (awWalletConnectClient != null)
+        {
+            awWalletConnectClient.shutdown();
+        }
+>>>>>>> upstream/master
     }
 
     private void pop()

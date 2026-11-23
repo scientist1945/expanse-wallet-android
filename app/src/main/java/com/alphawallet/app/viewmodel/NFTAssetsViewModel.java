@@ -21,7 +21,8 @@ import javax.inject.Inject;
 import dagger.hilt.android.lifecycle.HiltViewModel;
 
 @HiltViewModel
-public class NFTAssetsViewModel extends BaseViewModel {
+public class NFTAssetsViewModel extends BaseViewModel
+{
     private final FetchTransactionsInteract fetchTransactionsInteract;
     private final AssetDefinitionService assetDefinitionService;
     private final TokensService tokensService;
@@ -64,13 +65,14 @@ public class NFTAssetsViewModel extends BaseViewModel {
         return intent;
     }
 
-    public Intent showAssetDetails(Context context, Wallet wallet, Token token, BigInteger tokenId)
+    public Intent showAssetDetails(Context context, Wallet wallet, Token token, BigInteger tokenId, NFTAsset asset)
     {
         Intent intent = new Intent(context, NFTAssetDetailActivity.class);
         intent.putExtra(C.Key.WALLET, wallet);
         intent.putExtra(C.EXTRA_CHAIN_ID, token.tokenInfo.chainId);
         intent.putExtra(C.EXTRA_ADDRESS, token.getAddress());
         intent.putExtra(C.EXTRA_TOKEN_ID, tokenId.toString());
+        if (asset != null) intent.putExtra(C.EXTRA_NFTASSET, asset);
         return intent;
     }
 }

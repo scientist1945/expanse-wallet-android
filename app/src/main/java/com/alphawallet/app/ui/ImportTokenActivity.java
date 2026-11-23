@@ -1,11 +1,17 @@
 package com.alphawallet.app.ui;
 
+import static com.alphawallet.app.C.IMPORT_STRING;
+import static com.alphawallet.app.entity.Operation.SIGN_DATA;
+import static com.alphawallet.ethereum.EthereumNetworkBase.GNOSIS_ID;
+import static com.alphawallet.token.tools.Convert.getEthString;
+import static com.alphawallet.token.tools.ParseMagicLink.currencyLink;
+import static com.alphawallet.token.tools.ParseMagicLink.spawnable;
+
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
 import android.webkit.WebView;
@@ -22,8 +28,8 @@ import com.alphawallet.app.entity.CryptoFunctions;
 import com.alphawallet.app.entity.ErrorEnvelope;
 import com.alphawallet.app.entity.NetworkInfo;
 import com.alphawallet.app.entity.SignAuthenticationCallback;
-import com.alphawallet.app.entity.tokens.Token;
 import com.alphawallet.app.entity.tokendata.TokenTicker;
+import com.alphawallet.app.entity.tokens.Token;
 import com.alphawallet.app.repository.EthereumNetworkRepository;
 import com.alphawallet.app.router.HomeRouter;
 import com.alphawallet.app.service.TickerService;
@@ -35,7 +41,7 @@ import com.alphawallet.app.widget.AWalletAlertDialog;
 import com.alphawallet.app.widget.AWalletConfirmationDialog;
 import com.alphawallet.app.widget.CertifiedToolbarView;
 import com.alphawallet.app.widget.SignTransactionDialog;
-import com.alphawallet.app.widget.SystemView;
+import com.alphawallet.hardware.SignatureFromKey;
 import com.alphawallet.token.entity.MagicLinkData;
 import com.alphawallet.token.entity.TicketRange;
 import com.alphawallet.token.tools.Convert;
@@ -43,18 +49,8 @@ import com.alphawallet.token.tools.ParseMagicLink;
 
 import java.math.BigDecimal;
 
-import javax.inject.Inject;
-
-import timber.log.Timber;
-
-import static com.alphawallet.app.C.IMPORT_STRING;
-import static com.alphawallet.app.entity.Operation.SIGN_DATA;
-import static com.alphawallet.ethereum.EthereumNetworkBase.XDAI_ID;
-import static com.alphawallet.token.tools.Convert.getEthString;
-import static com.alphawallet.token.tools.ParseMagicLink.currencyLink;
-import static com.alphawallet.token.tools.ParseMagicLink.spawnable;
-
 import dagger.hilt.android.AndroidEntryPoint;
+import timber.log.Timber;
 
 /**
  * Created by James on 9/03/2018.
@@ -63,8 +59,6 @@ import dagger.hilt.android.AndroidEntryPoint;
 public class ImportTokenActivity extends BaseActivity implements View.OnClickListener, SignAuthenticationCallback, PageReadyCallback
 {
     private ImportTokenViewModel viewModel;
-    private SystemView systemView;
-
     private TicketRange ticketRange;
     private String importString;
     private AWalletAlertDialog aDialog;
@@ -79,7 +73,6 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
     private TextView importTxt;
 
     private LinearLayout costLayout;
-    private long chainId = 0;
     private boolean usingFeeMaster = false;
     private final String paymasterUrlPrefix = "https://paymaster.stormbird.sg/api/";
     private final String TAG = "ITA";
@@ -95,7 +88,6 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         setTitle(getString(R.string.toolbar_header_importing_tickets));
 
         importString = getIntent().getStringExtra(IMPORT_STRING);
-        systemView = findViewById(R.id.system_view);
         priceETH = findViewById(R.id.textImportPrice);
         priceUSD = findViewById(R.id.textImportPriceUSD);
         priceUSDLabel = findViewById(R.id.fiat_price_txt);
@@ -157,7 +149,7 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
             {
                 case currencyLink:
                     //for currency drop link, check xDai first, then other networks
-                    viewModel.switchNetwork(XDAI_ID);
+                    viewModel.switchNetwork(GNOSIS_ID);
                     viewModel.checkTokenNetwork(contractAddress, "requiredPrefix");
                     break;
                 default:
@@ -169,7 +161,6 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
 
     private void onNetwork(NetworkInfo networkInfo)
     {
-        chainId = networkInfo.chainId;
         TextView networkText = findViewById(R.id.textNetworkName);
         networkText.setText(networkInfo.name);
     }
@@ -218,15 +209,23 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
 
     //TODO: Use Activity Launcher model (eg see tokenManagementLauncher in WalletFragment)
     @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case android.R.id.home: {
-                new HomeRouter().open(this, true);
-                finish();
-                return true;
-            }
+    public boolean onOptionsItemSelected(MenuItem item)
+    {
+        if (item.getItemId() == android.R.id.home)
+        {
+            new HomeRouter().open(this, true);
+            finish();
+            return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    public void handleBackPressed()
+    {
+        setResult(RESULT_CANCELED);
+        new HomeRouter().open(this, true);
+        finish();
     }
 
     private void setTicket(boolean ticket, boolean progress, boolean invalid)
@@ -358,6 +357,10 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         importTickets.setVisibility(View.VISIBLE);
         importTickets.setAlpha(1.0f);
         MagicLinkData data = viewModel.getSalesOrder();
+        if (token != null)
+        {
+            tokenView.setChainId(token.tokenInfo.chainId);
+        }
 
         switch (data.contractType)
         {
@@ -532,7 +535,12 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
     }
 
     @Override
+<<<<<<< HEAD
     public void onClick(View v) {
+=======
+    public void onClick(View v)
+    {
+>>>>>>> upstream/master
         if (v.getId() == R.id.import_ticket)
         {
             if (ticketRange != null)
@@ -568,22 +576,7 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         }
         else
         {
-            //needs gas, so require auth first
-            SignAuthenticationCallback cb = new SignAuthenticationCallback()
-            {
-                @Override
-                public void gotAuthorisation(boolean gotAuth)
-                {
-                    viewModel.performImport();
-                }
-
-                @Override
-                public void cancelAuthentication()
-                {
-
-                }
-            };
-            viewModel.getAuthorisation(this, cb);
+            viewModel.getAuthorisation(this, this);
         }
     }
 
@@ -600,40 +593,6 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         }
     }
 
-    public static String getMagiclinkFromClipboard(Context ctx)
-    {
-        String magicLink = null;
-        try
-        {
-            //try clipboard data
-            ClipboardManager clipboard = (ClipboardManager) ctx.getSystemService(CLIPBOARD_SERVICE);
-            CharSequence text = clipboard.getPrimaryClip().getItemAt(0).getText();
-
-            //see if text is a magic link
-            if (text != null && text.length() > 60 && text.length() < 300)
-            {
-                //could be magicLink
-                CryptoFunctions cryptoFunctions = new CryptoFunctions();
-                ParseMagicLink parser = new ParseMagicLink(cryptoFunctions, EthereumNetworkRepository.extraChains());
-                MagicLinkData order = parser.parseUniversalLink(text.toString());
-                if (Utils.isAddressValid(order.contractAddress) && order.indices.length > 0)
-                {
-                    magicLink = text.toString();
-                    //now clear the clipboard - we only ever do this if it's definitely a magicLink in the clipboard
-                    ClipData clipData = ClipData.newPlainText("", "");
-                    clipboard.setPrimaryClip(clipData);
-                }
-            }
-        }
-        catch (Exception e)
-        {
-            //not a magicLink
-            magicLink = null;
-        }
-
-        return magicLink;
-    }
-
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode,resultCode,intent);
@@ -642,12 +601,6 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         {
             gotAuthorisation(resultCode == RESULT_OK);
         }
-    }
-
-    @Override
-    public void onBackPressed() {
-        setResult(RESULT_CANCELED);
-        super.onBackPressed();
     }
 
     /**
@@ -675,6 +628,12 @@ public class ImportTokenActivity extends BaseActivity implements View.OnClickLis
         });
         dialog.setCancelable(true);
         dialog.show();
+    }
+
+    @Override
+    public void gotSignature(SignatureFromKey signature)
+    {
+        //TODO: Hardware
     }
 
     @Override
